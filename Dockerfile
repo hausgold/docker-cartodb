@@ -165,17 +165,25 @@ RUN git clone git://github.com/CartoDB/cartodb.git && \
             /bin/bash -l -c 'bundle install'"
 
 # Geocoder SQL client + server
-RUN git clone https://github.com/CartoDB/data-services &&\
-  cd /data-services/geocoder/extension && PGUSER=postgres make all install && cd / && \
-  git clone https://github.com/CartoDB/dataservices-api.git &&\
-  ln -s /usr/local/rvm/rubies/ruby-2.2.3/bin/ruby /usr/bin &&\
-  cd /dataservices-api/server/extension && PGUSER=postgres make install &&\
-  cd ../lib/python/cartodb_services && python setup.py install &&\
-  cd ../../../../client && PGUSER=postgres make install &&\
+# Instructions at https://github.com/CartoDB/dataservices-api,
+# skipping observatory as it is not a public repo
+ADD ./config/dataservices.sql /dataservices.sql
+RUN git clone https://github.com/CartoDB/dataservices-api.git && cd dataservices-api && \
+  git clone https://github.com/CartoDB/data-services.git && \
+  ln -s /usr/local/rvm/rubies/ruby-2.2.3/bin/ruby /usr/bin && \
+  cd data-services/geocoder/extension && \
+    make install && \
+  cd ../../.. && \
+  cd client && make install && cd .. && \
+  cd server/extension && make install && cd ../.. && \
+  curl https://bootstrap.pypa.io/get-pip.py | python && \
+  cd server/lib/python/cartodb_services && \
+    pip install --upgrade -r requirements.txt . && \
+  cd ../../../.. && \
   service postgresql start && \
-  echo "CREATE ROLE geocoder WITH LOGIN SUPERUSER PASSWORD 'geocoder'" | psql -U postgres postgres &&\
-  createdb -U postgres -E UTF8 -O geocoder geocoder &&\
-  echo 'CREATE EXTENSION plpythonu;CREATE EXTENSION postgis;CREATE EXTENSION cartodb;CREATE EXTENSION cdb_geocoder;CREATE EXTENSION plproxy;CREATE EXTENSION cdb_dataservices_server;CREATE EXTENSION cdb_dataservices_client;' | psql -U geocoder geocoder &&\
+    echo "CREATE ROLE geocoder WITH LOGIN SUPERUSER PASSWORD 'geocoder'" | psql -U postgres postgres && \
+    createdb -U postgres -E UTF8 -O geocoder geocoder && \
+    psql -U geocoder geocoder < /dataservices.sql && \
   service postgresql stop
 
 # Copy confs
@@ -191,7 +199,9 @@ ENV PATH /usr/local/rvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/s
 RUN mkdir -p /cartodb/log && touch /cartodb/log/users_modifications
 RUN service postgresql start && service redis-server start && \
 	bash -l -c "cd /cartodb && bash script/create_dev_user || bash script/create_dev_user && bash script/setup_organization.sh" && \
-# Enable CARTO Builder    
+#    bundle exec rake cartodb:db:configure_geocoder_extension_for_non_org_users['',true] && \
+#    bundle exec rake cartodb:db:configure_geocoder_extension_for_organizations['',true] && \
+# Enable CARTO Builder
 #    bundle exec rake cartodb:features:enable_feature_for_all_users['editor-3'] && \
 #    bundle exec rake cartodb:features:enable_feature_for_all_users['explore_site']" && \
 	service postgresql stop && service redis-server stop
